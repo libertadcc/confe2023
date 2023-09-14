@@ -1,0 +1,256 @@
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>
+        ImageryTileLayer - raster function | Sample | ArcGIS Maps SDK for
+        JavaScript 4.27
+    </title>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.27/esri/themes/light/main.css" />
+    <script src="https://js.arcgis.com/4.27/"></script>
+
+    <style>
+        html,
+        body,
+        #viewDiv {
+            padding: 0;
+            margin: 0;
+            height: 100%;
+            width: 100%;
+        }
+
+        #infoDiv {
+            padding: 10px;
+            width: 360px;
+        }
+    </style>
+    <script>
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/layers/support/RasterFunction",
+            "esri/layers/support/rasterFunctionConstants",
+            "esri/layers/ImageryTileLayer",
+            "esri/widgets/Swipe",
+            "esri/Graphic",
+            "esri/core/promiseUtils"
+        ], (
+            Map,
+            MapView,
+            RasterFunction,
+            rasterFunctionConstants,
+            ImageryTileLayer,
+            Swipe,
+            Graphic,
+            promiseUtils
+        ) =>
+            (async () => {
+                // NDVI raster function where the output will be between 0-255
+                const ndsi = new RasterFunction({
+                    functionName: "BandArithmetic",
+                    functionArguments: {
+                        method: rasterFunctionConstants.bandIndexType.NDSI,
+                        bandIndexes: "3 11"
+                    }
+                });
+
+
+
+                // Apply a color map to the NDVI raster function result
+                // use one of the predefined NDVI color map.
+                const colormap = new RasterFunction({
+                    functionName: "Colormap",
+                    functionArguments: {
+                        "Colormap": [
+                            //[<value1>, <red1>, <green1>, <blue1>], //[int, int, int, int]
+                            [0.7, 255, 0, 0],
+                            [1, 155, 155, 155],
+                            [100, 0, 0, 155] 
+                        ],
+
+                        raster: ndsi
+                    }
+                });
+
+
+
+                // apply the client-side raster function to the imagery layer.
+                const layer23 = new ImageryTileLayer({
+                    // 2023
+                    url: "https://tiledimageservices1.arcgis.com/YFraetVkEAF1lMag/arcgis/rest/services/Pirineos_05_01_2023/ImageServer",
+                    rasterFunction: colormap
+                });
+
+                const layer18 = new ImageryTileLayer({
+                    //2018
+                    url: "https://tiledimageservices1.arcgis.com/YFraetVkEAF1lMag/arcgis/rest/services/PirineosMultiband_31_01_2018/ImageServer",
+
+
+                    rasterFunction: colormap
+                });
+
+                const map = new Map({
+                    //basemap: "gray-vector",
+                    basemap: 'satellite',
+                    layers: [layer23, layer18]
+                });
+
+
+
+                const view = new MapView({
+                    container: "viewDiv",
+                    map: map
+                });
+
+                // create a new Swipe widget
+                const swipe = new Swipe({
+                    leadingLayers: [layer23],
+                    trailingLayers: [layer18],
+                    position: 35, // set position of widget to 35%
+                    view: view
+                });
+                // add the widget to the view
+                view.ui.add(swipe);
+
+
+                view.ui.add("infoDiv", "top-right");
+                let chartDiv = document.getElementById("chartDiv");
+
+                await view.whenLayerView(layer);
+                view.goTo(layer.fullExtent);
+
+                view.on(["pointer-move"], (event) => {
+                    // update mouse location graphic
+                    graphic.geometry = view.toMap({ x: event.x, y: event.y });
+                    // debounce the imagerytilelayer.identify method from
+                    // pointer-move event to improve performance
+                    debouncedUpdate(event).catch((error) => {
+                        if (!promiseUtils.isAbortError(error)) {
+                            throw error;
+                        }
+                    });
+                });
+
+                const debouncedUpdate = promiseUtils.debounce((event) => {
+                    const point = view.toMap({ x: event.x, y: event.y });
+
+                    // get pixel values from the pointer location as user moves the
+                    // pointer over the image. Use pixel values from each band to
+                    // create a spectral chart. Also calculate the NDVI value for the location.
+                    return layer
+                        .identify(point)
+                        .then((results) => {
+                            if (results.value) {
+                                console.log('results.value', results)
+                                document.getElementById("instruction").style.display = "none";
+                                // Update the spectral chart for the clicked location on the image
+                                spectralChart.data.datasets[0].data = [];
+                                spectralChart.data.datasets[0].data = results.value;
+                                spectralChart.update(0);
+                                if (chartDiv.style.display === "none") {
+                                    chartDiv.style.display = "block";
+                                }
+                                document.getElementById(
+                                    "ndviValueDiv"
+                                ).innerHTML = `Processed NDSI value:  ${(results.processedValue)
+                                    }`;
+                            } else {
+                                document.getElementById("instruction").style.display =
+                                    "block";
+                                chartDiv.style.display = "none";
+                                document.getElementById("ndviValueDiv").innerHTML = "";
+                            }
+                        })
+                        .catch((error) => {
+                            if (!promiseUtils.isAbortError(error)) {
+                                throw error;
+                            }
+                        });
+                });
+
+                let spectralChart;
+                createSpectralChart();
+                console.log(colormap)
+
+                // create the spectral profile chart
+                function createSpectralChart() {
+                    const spectralCanvas = document.getElementById("spectral-chart");
+                    spectralChart = new Chart(spectralCanvas.getContext("2d"), {
+                        type: "line",
+                        data: {
+                            labels: [
+                                "Coastal - 0.45",
+                                "Blue - 0.51",
+                                "Green - 0.59",
+                                "Red - 0.67",
+                                "NIR - 0.88",
+                                "SWIR1 - 1.65",
+                                "SWIR2 - 2.229",
+                                "Cirrus - 1.38"
+                            ],
+                            datasets: [
+                                {
+                                    borderColor: "rgb(75, 192, 192)",
+                                    tension: 0.1
+                                }
+                            ]
+                        },
+                        options: {
+                            scales: {
+                                yAxis: {
+                                    title: {
+                                        display: true,
+                                        text: "DN"
+                                    },
+                                    min: 4500,
+                                    max: 30000
+                                },
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: "Band Ids - wavelength (micrometer)"
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: false
+                                },
+                                title: {
+                                    display: true,
+                                    text: "Spectral profile"
+                                }
+                            }
+                        }
+                    });
+                }
+
+                let graphic = new Graphic({
+                    symbol: {
+                        type: "simple-marker",
+                        color: "cyan"
+                    }
+                });
+                view.graphics.add(graphic);
+            })());
+    </script>
+</head>
+
+<body>
+    <div id="viewDiv"></div>
+    <div id="infoDiv" class="esri-widget">
+        <h3 id="instruction" class="esri-widget__heading">
+            Move the pointer over the image for more info.
+        </h3>
+        <br />
+        <div id="chartDiv" style="display: none">
+            <canvas id="spectral-chart" height="300" width="360" class="esri-widget"></canvas><br /><br />
+        </div>
+        <div id="ndviValueDiv"></div>
+    </div>
+</body>
+
+</html>

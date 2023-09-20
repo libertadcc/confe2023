@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+
+    <script type="module" src="https://js.arcgis.com/calcite-components/1.4.2/calcite.esm.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://js.arcgis.com/calcite-components/1.4.2/calcite.css" />
+
+
+    <link rel="stylesheet" href="https://js.arcgis.com/4.27/esri/themes/light/main.css" />
+    <script src="https://js.arcgis.com/4.27/"></script>
+
+    <style>
+        html,
+        body,
+        #viewDiv {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #titleDiv {
+            padding: 20px;
+            font-size: 18pt;
+            font-family: "Belleza", sans-serif;
+            text-align: center;
+            background-color: rgb(255, 255, 255, 1);
+            border-radius: 7px;
+        }
+    </style>
+    <script type="text/plain" id="protected-area">
+        var espaciosProtegidos = FeatureSetByPortalItem(
+            Portal("https://www.arcgis.com"),
+            '3379c8d7e2fa4f59adfa7d5020e49228',
+            0,
+            ['figura_lp', 'sitename'], 
+            false
+        );
+
+        var glaciarBuf = Buffer($feature, 1, 'kilometers');
+        var isIntersected = Intersects(espaciosProtegidos, glaciarBuf);
+        
+        if (Count(isIntersected) > 0) {
+            // Si hay intersección, accede al primer registro en el FeatureSet
+            var espacio = First(isIntersected);
+            
+            // Devuelve el nombre del sitio
+            return espacio.figura_lp +": " + espacio.sitename;
+        } else {
+            // No hay intersección, puedes manejarlo como desees
+            return "No pertenece a ningún espacio protegido";
+        }
+    </script>
+    <script>
+        require(
+            ["esri/WebScene",
+                "esri/layers/FeatureLayer",
+                "esri/views/SceneView",
+                "esri/Map",
+                "esri/PopupTemplate",
+                "esri/popup/content/CustomContent",
+                "esri/geometry/Circle"
+            ], (WebScene, FeatureLayer, SceneView,
+                Map, PopupTemplate, CustomContent,
+                Circle
+            ) => {
+
+
+                const arcadeExpressionInfos = [
+                {
+                    name: "protected-area",
+                    title: "Testing...",
+                    expression: document.getElementById("protected-area").text
+                },
+            ]
+            const map = new Map({
+                basemap: "topo-vector", //Basemap layer service
+                ground: "world-elevation", //Elevation service
+            });
+
+            //42,767263, 0,209546
+            const view = new SceneView({
+                container: "viewDiv",
+                map: map,
+                qualityProfile: "high",
+                environment: {
+                    lighting: {
+                        directShadowsEnabled: true
+                    }
+                },
+                camera: {
+                    position: {
+                        latitude: 42.7,
+                        longitude: 0.54,
+                        z: 135_000
+                    },
+                    tilt: 0.49,
+                    heading: 359.9
+                }
+            });
+
+            const peaks = new FeatureLayer({
+                url: "https://services1.arcgis.com/YFraetVkEAF1lMag/arcgis/rest/services/Glaciares/FeatureServer/0",
+                elevationInfo: {
+                    mode: "relative-to-ground"
+                },
+                returnZ: false,
+                screenSizePerspectiveEnabled: false,
+                // Set a renderer that will show the points with icon symbols
+                renderer: {
+                    type: "simple", // autocasts as new SimpleRenderer()
+                    symbol: {
+                        type: "point-3d", // autocasts as new PointSymbol3D()
+                        symbolLayers: [
+                            {
+                                type: "icon", // autocasts as new IconSymbol3DLayer()
+                                resource: {
+                                    primitive: "circle"
+                                },
+                                material: {
+                                    color: "black"
+                                },
+                                size: 4
+                            }
+                        ]
+                    }
+                },
+                outFields: ["*"],
+                // Add labels with callouts of type line to the icons
+                popupTemplate: {
+                    title: "{Glaciar}",
+                    content: [{
+                        type: 'text',
+                        text: "{expression/protected-area}"
+                    }],
+                    expressionInfos: arcadeExpressionInfos
+                },
+                labelingInfo: {
+                    // autocasts as new LabelClass()
+                    labelPlacement: "above-center", // When using callouts on labels, "above-center" is the only allowed position
+                    labelExpressionInfo: {
+                        expression: `$feature.Glaciar + TextFormatting.NewLine + Text($feature.Altura_media, "#,### m") +
+                            TextFormatting.NewLine +  $feature.Extensión + " ha" +
+                            TextFormatting.NewLine + $feature.Orientación +
+                            TextFormatting.NewLine + $feature.País`
+                    },
+                    //where: "Altura_media > " + above, // The scene view picks the first label class that satisfies this condition
+                    symbol: {
+                        type: "label-3d", // autocasts as new LabelSymbol3D()
+                        symbolLayers: [
+                            {
+                                type: "text", // autocasts as new TextSymbol3DLayer()
+                                material: { color: "black" },
+                                halo: {
+                                    color: [255, 255, 255, 0.7],
+                                    size: 1.2
+                                },
+                                font: {
+                                    family: "Belleza" // This font will be loaded from https://static.arcgis.com/fonts
+                                },
+                                size: 14 // Larger font sizes will be prioritized when deconflicting labels
+                            }
+                        ],
+                        // Labels need a small vertical offset that will be used by the callout
+                        verticalOffset: {
+                            screenLength: 75,
+                            maxWorldLength: 1000,
+                            minWorldLength: 30
+                        },
+                        // The callout has to have a defined type (currently only line is possible)
+                        // The size, the color and the border color can be customized
+                        callout: {
+                            type: "line", // autocasts as new LineCallout3D()
+                            size: 0.5,
+                            color: [0, 0, 0],
+                            border: {
+                                color: [255, 255, 255, 0.7]
+                            }
+                        }
+                    }
+                }
+            });
+
+           
+        
+            map.add(peaks);
+
+        })
+    </script>
+</head>
+
+<body>
+
+    <body>
+        <div id="viewDiv" class="esri-widget"></div>
+        <div id="titleDiv">Glaciares en Los Pirineos</div>
+    </body>
+</body>
+
+</html>
